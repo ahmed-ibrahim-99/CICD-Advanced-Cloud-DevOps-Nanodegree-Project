@@ -1,5 +1,16 @@
 version: 2.1
 
+orbs:
+  slack: circleci/slack@4.10.1
+
+commands:
+  notify_failure:
+    steps:
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
+
 jobs:
   build-frontend:
     docker:
@@ -9,6 +20,9 @@ jobs:
       - restore_cache:
           keys: [frontend-build]
       - run:
+          name: Fail on purpose
+          command: return 1
+      - run:
           name: Front-end build
           command: |
             cd frontend
@@ -17,6 +31,7 @@ jobs:
       - save_cache:
           paths: [frontend/node_modules]
           key: frontend-build
+      - notify_failure
 
   build-backend:
     docker:
@@ -34,6 +49,7 @@ jobs:
       - save_cache:
           paths: [backend/node_modules]
           key: backend-build
+      - notify_failure
   
   test-frontend:
     docker:
@@ -48,6 +64,7 @@ jobs:
             cd frontend
             npm install
             npm run test
+      - notify_failure
 
   test-backend:
     docker:
@@ -62,6 +79,7 @@ jobs:
             cd backend
             npm install
             npm run test
+      - notify_failure
   
   scan-frontend:
     docker:
@@ -77,6 +95,7 @@ jobs:
             npm install
             npm audit fix --audit-level=critical --force
             npm audit --audit-level=critical
+      - notify_failure
 
   scan-backend:
     docker:
@@ -93,21 +112,28 @@ jobs:
             npm audit fix --audit-level=critical --force
             npm audit fix --force
             npm audit --audit-level=critical
+      - notify_failure
 
 workflows:
   default:
     jobs:
-      - build-frontend
-      - build-backend
+      - build-frontend:
+          context: Slack-Notifications-Udacity-Project
+      - build-backend:
+          context: Slack-Notifications-Udacity-Project
       - test-frontend:
           requires:
             - build-frontend
+          context: Slack-Notifications-Udacity-Project
       - test-backend:
           requires:
             - build-backend
+          context: Slack-Notifications-Udacity-Project
       - scan-frontend:
           requires:
             - build-frontend
+          context: Slack-Notifications-Udacity-Project
       - scan-backend:
           requires:
             - build-backend
+          context: Slack-Notifications-Udacity-Project
