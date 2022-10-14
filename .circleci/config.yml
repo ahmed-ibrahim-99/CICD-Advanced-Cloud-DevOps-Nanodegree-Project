@@ -138,7 +138,7 @@ jobs:
               --template-file backend.yml \
               --stack-name "udapeople-backend-${CIRCLE_WORKFLOW_ID:0:7}" \
               --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
-              --tags project=udapeople
+              --tags project=udapeople-backend
             cd ../..
       - run:
           name: Ensure frontend infrastructure exist
@@ -148,21 +148,55 @@ jobs:
               --template-file frontend.yml \
               --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}" \
               --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
-              --tags project=udapeople
+              --tags project=udapeople-frontend
             cd ../..
       - run:
-          name: Add instance ip
+          name: Add backend instance ips
           command: |
             cd .circleci/ansible
             rm inventory.txt;
-            echo "[all]" >> inventory.txt
+            echo "[backend]" >> inventory.txt
             aws ec2 describe-instances \
               --query 'Reservations[*].Instances[*].PublicIpAddress' \
-              --filters "Name=tag:project,Values=udapeople" \
+              --filters "Name=tag:project,Values=udapeople-backend" \
               --output text >> inventory.txt
             cd ../..
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            - project/*
       - destory_environment_on_failure
-      - notify_failure
+
+  configure-infrastructure:
+    docker:
+      - image: python:3.7-alpine3.11
+    steps:
+      - attach_workspace:
+          at: ~/
+      - add_ssh_keys:
+          fingerprints: ["e7:2e:e3:83:66:0d:62:d4:ad:d7:73:fb:f5:b3:19:a3"]
+      - run:
+          name: Install dependencies
+          command: |
+            apk add --no-cache \
+                python3 \
+                py3-pip \
+            && pip3 install --upgrade pip \
+            && pip3 install --no-cache-dir \
+                awscli \
+            && rm -rf /var/cache/apk/*
+            apk add --update ansible
+      - run:
+          name: Run Playbook and Configure Servers
+          command: |
+            cd .circleci/ansible
+            ansible-playbook -i inventory.txt configure-server.yml
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            - project/*
+      - destory_environment_on_failure
+
 
 workflows:
   default:
@@ -172,25 +206,18 @@ workflows:
       - build-backend:
           context: ${SLACK_CONTEXT}
       - test-frontend:
-          requires:
-            - build-frontend
+          requires: [build-frontend]
           context: ${SLACK_CONTEXT}
       - test-backend:
-          requires:
-            - build-backend
+          requires: [build-backend]
           context: ${SLACK_CONTEXT}
       - scan-frontend:
-          requires:
-            - build-frontend
+          requires: [build-frontend]
           context: ${SLACK_CONTEXT}
       - scan-backend:
-          requires:
-            - build-backend
+          requires: [build-backend]
           context: ${SLACK_CONTEXT}
       - deploy-infrastructure:
-          requires:
-            - scan-frontend
-            - test-frontend
-            - scan-backend
-            - test-backend
-          context: ${SLACK_CONTEXT}
+          requires: [scan-frontend, test-frontend, scan-backend, test-backend]
+      - configure-infrastructure:
+          requires: [deploy-infrastructure]
