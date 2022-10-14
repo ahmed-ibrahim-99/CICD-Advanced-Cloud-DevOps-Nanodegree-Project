@@ -127,35 +127,40 @@ jobs:
       - image: amazon/aws-cli
     steps:
       - checkout
-      - run: cd ./.circleci/ansible
       - run:
           name: Install tar and gzip utilities
           command: yum install -y tar gzip
       - run:
           name: Ensure backend infrastructure exist
           command: |
+            cd .circleci/files
             aws cloudformation deploy \
-              --template-file .circleci/files/backend.yml \
+              --template-file backend.yml \
               --stack-name "udapeople-backend-${CIRCLE_WORKFLOW_ID:0:7}" \
               --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
               --tags project=udapeople
+            cd ../..
       - run:
           name: Ensure frontend infrastructure exist
           command: |
+            cd .circleci/files
             aws cloudformation deploy \
-              --template-file .circleci/files/frontend.yml \
+              --template-file frontend.yml \
               --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}" \
               --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
               --tags project=udapeople
+            cd ../..
       - run:
           name: Add instance ip
           command: |
-            rm inventory;
-            echo "[all]" >> inventory;
+            cd .circleci/ansible
+            rm inventory.txt;
+            echo "[all]" >> inventory.txt
             aws ec2 describe-instances \
-            --query 'Reservations[*].Instances[*].PublicIpAddress' \
-            --filters "Name=tag:Project,Values=Udacity" \
-            --output text >> inventory;
+              --query 'Reservations[*].Instances[*].PublicIpAddress' \
+              --filters "Name=tag:project,Values=udapeople" \
+              --output text >> inventory.txt
+            cd ../..
       - destory_environment_on_failure
       - notify_failure
 
@@ -163,29 +168,29 @@ workflows:
   default:
     jobs:
       - build-frontend:
-          context: Slack-Notifications-Udacity-Project
+          context: ${SLACK_CONTEXT}
       - build-backend:
-          context: Slack-Notifications-Udacity-Project
+          context: ${SLACK_CONTEXT}
       - test-frontend:
           requires:
             - build-frontend
-          context: Slack-Notifications-Udacity-Project
+          context: ${SLACK_CONTEXT}
       - test-backend:
           requires:
             - build-backend
-          context: Slack-Notifications-Udacity-Project
+          context: ${SLACK_CONTEXT}
       - scan-frontend:
           requires:
             - build-frontend
-          context: Slack-Notifications-Udacity-Project
+          context: ${SLACK_CONTEXT}
       - scan-backend:
           requires:
             - build-backend
-          context: Slack-Notifications-Udacity-Project
+          context: ${SLACK_CONTEXT}
       - deploy-infrastructure:
           requires:
             - scan-frontend
             - test-frontend
             - scan-backend
             - test-backend
-          context: Slack-Notifications-Udacity-Project
+          context: ${SLACK_CONTEXT}
