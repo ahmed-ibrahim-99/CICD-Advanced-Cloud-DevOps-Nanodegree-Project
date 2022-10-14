@@ -10,6 +10,14 @@ commands:
           event: fail
           mentions: "@Ahmed_Ibrahim"
           template: basic_fail_1
+  destory_environment_on_failure:
+    steps:
+      - run:
+          name: Infrastructure Rollback
+          when: on_fail
+          command: |
+            aws cloudformation delete-stack --stack-name "udapeople-backend-${CIRCLE_WORKFLOW_ID:0:7}"
+            aws cloudformation delete-stack --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}"
 
 jobs:
   build-frontend:
@@ -91,6 +99,8 @@ jobs:
             cd frontend
             npm install
             npm audit fix --audit-level=critical --force
+            npm audit fix --force
+            npm audit fix
             npm audit --audit-level=critical
       - notify_failure
 
@@ -108,7 +118,45 @@ jobs:
             npm install
             npm audit fix --audit-level=critical --force
             npm audit fix --force
+            npm audit fix
             npm audit --audit-level=critical
+      - notify_failure
+  
+  deploy-infrastructure:
+    docker:
+      - image: amazon/aws-cli
+    steps:
+      - checkout
+      - run: cd ./.circleci/ansible
+      - run:
+          name: Install tar and gzip utilities
+          command: yum install -y tar gzip
+      - run:
+          name: Ensure backend infrastructure exist
+          command: |
+            aws cloudformation deploy \
+              --template-file .circleci/files/backend.yml \
+              --stack-name "udapeople-backend-${CIRCLE_WORKFLOW_ID:0:7}" \
+              --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
+              --tags project=udapeople
+      - run:
+          name: Ensure frontend infrastructure exist
+          command: |
+            aws cloudformation deploy \
+              --template-file .circleci/files/frontend.yml \
+              --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}" \
+              --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
+              --tags project=udapeople
+      - run:
+          name: Add instance ip
+          command: |
+            rm inventory;
+            echo "[all]" >> inventory;
+            aws ec2 describe-instances \
+            --query 'Reservations[*].Instances[*].PublicIpAddress' \
+            --filters "Name=tag:Project,Values=Udacity" \
+            --output text >> inventory;
+      - destory_environment_on_failure
       - notify_failure
 
 workflows:
@@ -133,4 +181,11 @@ workflows:
       - scan-backend:
           requires:
             - build-backend
+          context: Slack-Notifications-Udacity-Project
+      - deploy-infrastructure:
+          requires:
+            - scan-frontend
+            - test-frontend
+            - scan-backend
+            - test-backend
           context: Slack-Notifications-Udacity-Project
