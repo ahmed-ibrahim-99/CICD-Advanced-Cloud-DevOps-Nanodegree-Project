@@ -46,6 +46,14 @@ commands:
             curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
             unzip awscliv2.zip
             sudo ./aws/install
+  install_nodejs:
+    steps:
+      - run:
+          name: Install nodejs
+          command: |
+            apk add npm bash
+            npm install -g n
+            n 13.8.0
   ensure_infrastructure_exists:
     parameters:
       layer:
@@ -59,7 +67,7 @@ commands:
               --template-file << parameters.layer >>.yml \
               --stack-name "udapeople-<< parameters.layer >>-${CIRCLE_WORKFLOW_ID:0:7}" \
               --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
-              --tags project=udapeople-<< parameters.layer >>
+              --tags project=udapeople
   build:
     parameters:
       directory:
@@ -226,7 +234,7 @@ jobs:
             echo "[backend]" >> inventory.txt
             aws ec2 describe-instances \
               --query 'Reservations[*].Instances[*].PublicIpAddress' \
-              --filters "Name=tag:project,Values=udapeople-backend" \
+              --filters "Name=tag:Name,Values=backend-${CIRCLE_WORKFLOW_ID:0:7}" \
               --output text >> inventory.txt
       - persist_to_workspace:
           root: ~/
@@ -289,31 +297,94 @@ jobs:
       - install_awscli
       - destory_environment_on_failure
       - revert_migrations_on_failure
+  
+  deploy-frontend:
+    executor: node
+    steps:
+      - checkout
+      - restore_cache:
+          keys: [frontend-build]
+      - install_awscli:
+          when: always
+      - run:
+          name: Get API URL
+          command: |
+            BACKEND_BASE_URL=$(aws ec2 describe-instances \
+              --query 'Reservations[*].Instances[*].PublicDnsName' \
+              --filters "Name=tag:Name,Values=backend-${CIRCLE_WORKFLOW_ID:0:7}" \
+              --output text)
+            export API_URL="http://${BACKEND_BASE_URL}:3030"
+      - run:
+          name: Deploy frontend objects
+          working_directory: ./frontend
+          command: |
+            npm install
+            npm run build
+            aws s3 cp ./dist "s3://udapeople-${CIRCLE_WORKFLOW_ID:0:7}" --recursive
+      - destory_environment_on_failure
+      - revert_migrations_on_failure
+  
+  deploy-backend:
+    executor: python
+    steps:
+      - attach_workspace:
+          at: ~/
+      - add_ssh_keys:
+          fingerprints: ["e7:2e:e3:83:66:0d:62:d4:ad:d7:73:fb:f5:b3:19:a3"]
+      - run:
+          name: Install curl, rsync, openssh, tar & gzip utilities
+          command: |
+            apk add curl tar gzip
+      - run:
+          name: Install ansible
+          command: |
+            apk add --update ansible
+      - install_nodejs
+      - run:
+          name: Package backend
+          working_directory: ./backend
+          command: |
+            npm install
+            npm run build
+      - run:
+          name: Deploy backend
+          working_directory: .circleci/ansible
+          command: |
+            echo "Backend Servers are: --------"
+            cat inventory.txt
+            ansible-playbook -i inventory.txt deploy-backend.yml
+      - install_awscli_python
+      - destory_environment_on_failure
+      - revert_migrations_on_failure
 
 # =====================================================================
 
 workflows:
   default:
     jobs:
-      - build-frontend:
-          context: ${SLACK_CONTEXT}
-      - build-backend:
-          context: ${SLACK_CONTEXT}
-      - test-frontend:
-          requires: [build-frontend]
-          context: ${SLACK_CONTEXT}
-      - test-backend:
-          requires: [build-backend]
-          context: ${SLACK_CONTEXT}
-      - scan-frontend:
-          requires: [build-frontend]
-          context: ${SLACK_CONTEXT}
-      - scan-backend:
-          requires: [build-backend]
-          context: ${SLACK_CONTEXT}
-      - deploy-infrastructure:
-          requires: [scan-frontend, test-frontend, scan-backend, test-backend]
+      # - build-frontend:
+      #     context: ${SLACK_CONTEXT}
+      # - build-backend:
+      #     context: ${SLACK_CONTEXT}
+      # - test-frontend:
+      #     requires: [build-frontend]
+      #     context: ${SLACK_CONTEXT}
+      # - test-backend:
+      #     requires: [build-backend]
+      #     context: ${SLACK_CONTEXT}
+      # - scan-frontend:
+      #     requires: [build-frontend]
+      #     context: ${SLACK_CONTEXT}
+      # - scan-backend:
+      #     requires: [build-backend]
+      #     context: ${SLACK_CONTEXT}
+      - deploy-infrastructure #:
+          # requires: [scan-frontend, test-frontend, scan-backend, test-backend]
       - configure-infrastructure:
           requires: [deploy-infrastructure]
       - run-migrations:
           requires: [configure-infrastructure]
+      - deploy-frontend:
+          requires: [run-migrations]  
+      - deploy-backend:
+          requires: [run-migrations]  
