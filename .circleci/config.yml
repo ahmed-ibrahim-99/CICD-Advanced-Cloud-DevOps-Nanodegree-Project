@@ -8,7 +8,7 @@ executors:
       - image: circleci/node:13.8.0
   python:
     docker:  
-      - image: python:3.7-alpine3.11
+      - image: cimg/python:3.10.4 
   aws:
     docker:
       - image: amazon/aws-cli
@@ -32,7 +32,7 @@ commands:
           name: Install awscli
           when: << parameters.when >>
           command: |
-            pip3 install awscli
+            python3 -m pip install --upgrade --user awscli
   install_awscli:
     parameters:
       when:
@@ -46,14 +46,21 @@ commands:
             curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
             unzip awscliv2.zip
             sudo ./aws/install
+  install_ansible_python:
+    steps:
+      - run:
+          name: Install ansible
+          command: |
+            python3 -m pip install --upgrade --user ansible
   install_nodejs:
     steps:
       - run:
           name: Install nodejs
           command: |
-            apk add npm bash
-            npm install -g n
-            n 13.8.0
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+            sudo apt install nodejs -y
+            sudo npm install n -g
+            sudo n 13.8.0
   ensure_infrastructure_exists:
     parameters:
       layer:
@@ -116,6 +123,13 @@ commands:
           event: fail
           mentions: "@Ahmed_Ibrahim"
           template: basic_fail_1
+  empty_s3_bucket_on_failure:
+    steps:
+      - run:
+          name: Empty S3 Bucket
+          when: on_fail
+          command: |
+            aws s3 rm s3://udapeople-${CIRCLE_WORKFLOW_ID:0:7} --recursive
   destory_environment_on_failure:
     steps:
       - run:
@@ -249,14 +263,11 @@ jobs:
           at: ~/
       - add_ssh_keys:
           fingerprints: ["e7:2e:e3:83:66:0d:62:d4:ad:d7:73:fb:f5:b3:19:a3"]
-      - run:
-          name: Install tar & gzip utilities
+      - run: 
+          name: install dependencies
           command: |
-            apk add tar gzip
-      - run:
-          name: Install ansible
-          command: |
-            apk add --update ansible
+            python3 -m pip install --upgrade --user pip
+      - install_ansible_python
       - run:
           name: Run Playbook and Configure Servers
           command: |
@@ -332,20 +343,22 @@ jobs:
       - add_ssh_keys:
           fingerprints: ["e7:2e:e3:83:66:0d:62:d4:ad:d7:73:fb:f5:b3:19:a3"]
       - run:
-          name: Install curl, rsync, openssh, tar & gzip utilities
+          name: Install dependencies
           command: |
-            apk add curl tar gzip
-      - run:
-          name: Install ansible
-          command: |
-            apk add --update ansible
+            python3 -m pip install --upgrade --user pip
+      - install_ansible_python
       - install_nodejs
       - run:
-          name: Package backend
+          name: Build backend
           working_directory: ./backend
           command: |
             npm install
             npm run build
+      - run:
+          name: Package backend
+          working_directory: .
+          command: |
+            tar -C backend -czvf artifact.tar.gz .
       - run:
           name: Deploy backend
           working_directory: .circleci/ansible
@@ -353,9 +366,49 @@ jobs:
             echo "Backend Servers are: --------"
             cat inventory.txt
             ansible-playbook -i inventory.txt deploy-backend.yml
-      - install_awscli_python
+      - empty_s3_bucket_on_failure
       - destory_environment_on_failure
       - revert_migrations_on_failure
+
+  smoke-test:
+    executor: node
+    steps:
+      - install_awscli:
+          when: always
+      - run:
+          name: Get API URL
+          command: |
+            BACKEND_BASE_URL=$(aws ec2 describe-instances \
+              --query 'Reservations[*].Instances[*].PublicIpAddress' \
+              --filters "Name=tag:Name,Values=backend-${CIRCLE_WORKFLOW_ID:0:7}" \
+              --output text)
+            API_URL="http://${BACKEND_BASE_URL}:3030"
+            printf "export API_URL=%s" "$API_URL" >> $BASH_ENV
+      - run:
+          name: Backend smoke test
+          command: |
+            echo "$API_URL/api/status"
+            echo "${API_URL}/api/status"
+            if curl -s "$API_URL/api/status" | grep "ok"
+            then
+                exit 0
+            else
+                exit 1
+            fi
+      - run:
+          name: Frontend smoke test
+          command: |
+            URL="http://udapeople-${CIRCLE_WORKFLOW_ID:0:7}.s3-website-us-east-1.amazonaws.com/#/employees"            
+            if curl -s ${URL} | grep "Welcome"
+            then
+              exit 1
+            else
+              exit 1
+            fi
+      - empty_s3_bucket_on_failure
+      - destory_environment_on_failure
+      - revert_migrations_on_failure
+
 
 # =====================================================================
 
@@ -388,3 +441,5 @@ workflows:
           requires: [run-migrations]  
       - deploy-backend:
           requires: [run-migrations]  
+      - smoke-test:
+          requires: [deploy-frontend, deploy-backend]

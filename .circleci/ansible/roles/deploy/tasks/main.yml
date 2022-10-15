@@ -1,49 +1,17 @@
 ---
-- name: "Install openssh for Ansible"
-  connection: local
-  become: true
-  package:
-    name: openssh
-    state: present
-    
-- name: "Install rsync for Ansible"
-  connection: local
-  become: true
-  package:
-    name: rsync
-    state: present
+- name: "Create dir"
+  shell: mkdir ~/backend
 
-- name: "Sync backend dependencies"
-  become: true
-  synchronize:
-    src: ~/project/backend/node_modules
-    dest: /home/ubuntu/app
-    recursive: true
+- name: "Sync artifact"
+  unarchive:
+    src: ../../artifact.tar.gz
+    dest: ~/backend
 
-- name: "Sync backend binaries"
-  become: true
-  synchronize:
-    src: ~/project/backend/dist
-    dest: /home/ubuntu/app
-    recursive: true
+- name: "Install artifact"
+  npm:
+    path: ~/backend
+    production: true
+    global: true
 
-- name: "Kill running running pm2"
-  become: true
-  command: pm2 delete all
-  ignore_errors: true
-
-- name: "Launch new backend app using pm2"
-  become: true
-  command: pm2 start main.js
-  args:
-    chdir: /home/ubuntu/app/dist
-  environment:
-    NODE_ENV: "production"
-    VERSION: "1"
-    TYPEORM_CONNECTION: "{{ lookup('env', 'TYPEORM_CONNECTION')}}"
-    TYPEORM_ENTITIES: "./modules/domain/**/*.entity{.ts,.js}"
-    TYPEORM_HOST: "{{ lookup('env', 'TYPEORM_HOST')}}"
-    TYPEORM_PORT: "{{ lookup('env', 'TYPEORM_PORT')}}"
-    TYPEORM_USERNAME: "{{ lookup('env', 'TYPEORM_USERNAME')}}"
-    TYPEORM_PASSWORD: "{{ lookup('env', 'TYPEORM_PASSWORD')}}"
-    TYPEORM_DATABASE: "{{ lookup('env', 'TYPEORM_DATABASE')}}"
+- name: "Start node app using pm2"
+  shell: cd ~/backend && pm2 stop all; pm2 start npm -- run start
