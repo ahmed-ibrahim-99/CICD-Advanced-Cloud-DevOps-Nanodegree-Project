@@ -1,9 +1,90 @@
 version: 2.1
 
+# =====================================================================
+
+executors:
+  node:
+    docker:
+      - image: circleci/node:13.8.0
+  python:
+    docker:  
+      - image: python:3.7-alpine3.11
+  aws:
+    docker:
+      - image: amazon/aws-cli
+
+# =====================================================================
+
 orbs:
   slack: circleci/slack@4.10.1
 
+
+# =====================================================================
+
 commands:
+  install_awscli:
+    parameters:
+      when:
+        type: string
+        default: "on_fail" # Install on fail to be able to destory environment, else specify "when" as "always" to use this command in other cases
+    steps:
+      - run:
+          name: Install awscli.
+          when: << parameters.when >>
+          command: |
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+  ensure_infrastructure_exists:
+    parameters:
+      layer:
+        type: string
+    steps:
+      - run:
+          name: Ensure << parameters.layer>> infrastructure exist
+          working_directory: ./.circleci/files
+          command: |
+            aws cloudformation deploy \
+              --template-file << parameters.layer >>.yml \
+              --stack-name "udapeople-<< parameters.layer >>-${CIRCLE_WORKFLOW_ID:0:7}" \
+              --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
+              --tags project=udapeople-<< parameters.layer >>
+  build:
+    parameters:
+      directory:
+        type: string
+    steps:
+      - run:
+          name: Run npm build
+          working_directory: << parameters.directory >>
+          command: |
+            npm install
+            npm run build
+  test:
+    parameters:
+      directory:
+        type: string
+    steps:
+      - run:
+          name: Run unit tests
+          working_directory: << parameters.directory >>
+          command: |
+            npm install
+            npm run build
+  audit:
+    parameters:
+      directory:
+        type: string
+    steps:
+      - run:
+          name: Run npm audit
+          working_directory: << parameters.directory >>
+          command:  |
+            npm install
+            npm audit fix --audit-level=critical --force
+            npm audit fix --force
+            npm audit fix
+            npm audit --audit-level=critical
   notify_failure:
     steps:
       - slack/notify:
@@ -18,149 +99,112 @@ commands:
           command: |
             aws cloudformation delete-stack --stack-name "udapeople-backend-${CIRCLE_WORKFLOW_ID:0:7}"
             aws cloudformation delete-stack --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}"
+  revert_migrations_on_failure:
+    steps:
+      - run:
+          name: Migrations Rollback
+          when: on_fail
+          working_directory: ./backend
+          command: |
+            MIGRATIONS_RESULT_URL=https://kvdb.io/QKZcdzsbLvL2cytQpCVVsk/migration_${CIRCLE_WORKFLOW_ID:0:7}
+            MIGRATION_DONE=$(curl -k ${MIGRATIONS_RESULT_URL})
+            if [[ $MIGRATION_DONE == 1 ]]
+            then
+              echo "reverting"
+              npm run migrations:revert
+            fi
+
+
+# =====================================================================
 
 jobs:
   build-frontend:
-    docker:
-      - image: circleci/node:13.8.0
+    executor: node
     steps:
       - checkout
       - restore_cache:
           keys: [frontend-build]
-      - run:
-          name: Front-end build
-          command: |
-            cd frontend
-            npm install
-            npm run build
+      - build:
+          directory: ./frontend
       - save_cache:
           paths: [frontend/node_modules]
           key: frontend-build
       - notify_failure
 
   build-backend:
-    docker:
-      - image: circleci/node:13.8.0
+    executor: node
     steps:
       - checkout
       - restore_cache:
           keys: [backend-build]
-      - run:
-          name: Back-end build
-          command: |
-             cd backend
-             npm install
-             npm run build
+      - build:
+          directory: ./backend
       - save_cache:
           paths: [backend/node_modules]
           key: backend-build
       - notify_failure
   
   test-frontend:
-    docker:
-      - image: circleci/node:13.8.0
+    executor: node
     steps:
       - checkout
       - restore_cache:
           keys: [frontend-build]
-      - run:
-          name: Front-end test
-          command:  |
-            cd frontend
-            npm install
-            npm run test
+      - test:
+          directory: ./frontend
       - notify_failure
 
   test-backend:
-    docker:
-      - image: circleci/node:13.8.0
+    executor: node
     steps:
       - checkout
       - restore_cache:
           keys: [backend-build]
-      - run:
-          name: Back-end test
-          command:  |
-            cd backend
-            npm install
-            npm run test
+      - test:
+          directory: ./backend
       - notify_failure
   
   scan-frontend:
-    docker:
-      - image: circleci/node:13.8.0
+    executor: node
     steps:
       - checkout
       - restore_cache:
           keys: [frontend-build]
-      - run:
-          name: Front-end audit
-          command:  |
-            cd frontend
-            npm install
-            npm audit fix --audit-level=critical --force
-            npm audit fix --force
-            npm audit fix
-            npm audit --audit-level=critical
+      - audit:
+          directory: ./frontend
       - notify_failure
 
   scan-backend:
-    docker:
-      - image: circleci/node:13.8.0
+    executor: node
     steps:
       - checkout
       - restore_cache:
           keys: [backend-build]
-      - run:
-          name: Back-end audit
-          command:  |
-            cd backend
-            npm install
-            npm audit fix --audit-level=critical --force
-            npm audit fix --force
-            npm audit fix
-            npm audit --audit-level=critical
+      - audit:
+          directory: ./backend
       - notify_failure
   
   deploy-infrastructure:
-    docker:
-      - image: amazon/aws-cli
+    executor: aws
     steps:
       - checkout
       - run:
           name: Install tar and gzip utilities
           command: yum install -y tar gzip
-      - run:
-          name: Ensure backend infrastructure exist
-          command: |
-            cd .circleci/files
-            aws cloudformation deploy \
-              --template-file backend.yml \
-              --stack-name "udapeople-backend-${CIRCLE_WORKFLOW_ID:0:7}" \
-              --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
-              --tags project=udapeople-backend
-            cd ../..
-      - run:
-          name: Ensure frontend infrastructure exist
-          command: |
-            cd .circleci/files
-            aws cloudformation deploy \
-              --template-file frontend.yml \
-              --stack-name "udapeople-frontend-${CIRCLE_WORKFLOW_ID:0:7}" \
-              --parameter-overrides ID="${CIRCLE_WORKFLOW_ID:0:7}"  \
-              --tags project=udapeople-frontend
-            cd ../..
+      - ensure_infrastructure_exists:
+          layer: backend
+      - ensure_infrastructure_exists:
+          layer: frontend
       - run:
           name: Add backend instance ips
+          working_directory: ./.circleci/ansible
           command: |
-            cd .circleci/ansible
             rm inventory.txt;
             echo "[backend]" >> inventory.txt
             aws ec2 describe-instances \
               --query 'Reservations[*].Instances[*].PublicIpAddress' \
               --filters "Name=tag:project,Values=udapeople-backend" \
               --output text >> inventory.txt
-            cd ../..
       - persist_to_workspace:
           root: ~/
           paths:
@@ -168,8 +212,7 @@ jobs:
       - destory_environment_on_failure
 
   configure-infrastructure:
-    docker:
-      - image: python:3.7-alpine3.11
+    executor: python
     steps:
       - attach_workspace:
           at: ~/
@@ -196,28 +239,61 @@ jobs:
           paths:
             - project/*
       - destory_environment_on_failure
+  
+  run-migrations:
+    executor: node
+    steps:
+      - checkout
+      - restore_cache:
+          keys: [backend-build]
+      - run:
+          name: Run migrations
+          working_directory: ./backend
+          command: |
+            npm install
+            npm run migrations > migrations_dump.txt
+      - run:
+          name: Send migration results to kvdb.io
+          working_directory: ./backend
+          command: |
+            MIGRATIONS_RESULT_URL=https://kvdb.io/QKZcdzsbLvL2cytQpCVVsk/migration_${CIRCLE_WORKFLOW_ID:0:7}
+            if grep -q "has been executed successfully." migrations_dump.txt
+            then
+              echo "Migration done, sending (1) to ${MIGRATIONS_RESULT_URL}"
+              curl -k ${MIGRATIONS_RESULT_URL} -d '1'
+            else
+              echo "Migration not done, verify your DB setup, an error might have happend or probably no migration needed, sending (0) to ${MIGRATIONS_RESULT_URL}"
+              curl -k ${MIGRATIONS_RESULT_URL} -d '0'
+            fi
+      - install_awscli
+      - destory_environment_on_failure
+      - revert_migrations_on_failure
 
+# =====================================================================
 
 workflows:
   default:
     jobs:
-      - build-frontend:
-          context: ${SLACK_CONTEXT}
-      - build-backend:
-          context: ${SLACK_CONTEXT}
-      - test-frontend:
-          requires: [build-frontend]
-          context: ${SLACK_CONTEXT}
-      - test-backend:
-          requires: [build-backend]
-          context: ${SLACK_CONTEXT}
-      - scan-frontend:
-          requires: [build-frontend]
-          context: ${SLACK_CONTEXT}
-      - scan-backend:
-          requires: [build-backend]
-          context: ${SLACK_CONTEXT}
-      - deploy-infrastructure:
-          requires: [scan-frontend, test-frontend, scan-backend, test-backend]
-      - configure-infrastructure:
-          requires: [deploy-infrastructure]
+      # - build-frontend:
+      #     context: ${SLACK_CONTEXT}
+      # - build-backend:
+      #     context: ${SLACK_CONTEXT}
+      # - test-frontend:
+      #     requires: [build-frontend]
+      #     context: ${SLACK_CONTEXT}
+      # - test-backend:
+      #     requires: [build-backend]
+      #     context: ${SLACK_CONTEXT}
+      # - scan-frontend:
+      #     requires: [build-frontend]
+      #     context: ${SLACK_CONTEXT}
+      # - scan-backend:
+      #     requires: [build-backend]
+      #     context: ${SLACK_CONTEXT}
+      # - deploy-infrastructure:
+      #     requires: [scan-frontend, test-frontend, scan-backend, test-backend]
+      # - configure-infrastructure:
+      #     requires: [deploy-infrastructure]
+      # - run-migrations:
+          # requires: [scan-frontend, test-frontend, scan-backend, test-backend]
+      - run-migrations
