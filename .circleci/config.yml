@@ -22,6 +22,17 @@ orbs:
 # =====================================================================
 
 commands:
+  install_awscli_python:
+    parameters:
+      when:
+        type: string
+        default: "on_fail" # Install on fail to be able to destory environment, else specify "when" as "always" to use this command in other cases
+    steps:
+      - run:
+          name: Install awscli
+          when: << parameters.when >>
+          command: |
+            pip3 install awscli
   install_awscli:
     parameters:
       when:
@@ -53,9 +64,11 @@ commands:
     parameters:
       directory:
         type: string
+      layer:
+        type: string
     steps:
       - run:
-          name: Run npm build
+          name: <<parameters.layer>> build
           working_directory: << parameters.directory >>
           command: |
             npm install
@@ -64,9 +77,11 @@ commands:
     parameters:
       directory:
         type: string
+      layer:
+        type: string
     steps:
       - run:
-          name: Run unit tests
+          name: <<parameters.layer>> test
           working_directory: << parameters.directory >>
           command: |
             npm install
@@ -75,9 +90,11 @@ commands:
     parameters:
       directory:
         type: string
+      layer:
+        type: string
     steps:
       - run:
-          name: Run npm audit
+          name: <<parameters.layer>> audit
           working_directory: << parameters.directory >>
           command:  |
             npm install
@@ -126,6 +143,7 @@ jobs:
           keys: [frontend-build]
       - build:
           directory: ./frontend
+          layer: Front-end
       - save_cache:
           paths: [frontend/node_modules]
           key: frontend-build
@@ -139,6 +157,7 @@ jobs:
           keys: [backend-build]
       - build:
           directory: ./backend
+          layer: Back-end
       - save_cache:
           paths: [backend/node_modules]
           key: backend-build
@@ -152,6 +171,7 @@ jobs:
           keys: [frontend-build]
       - test:
           directory: ./frontend
+          layer: Front-end
       - notify_failure
 
   test-backend:
@@ -162,6 +182,7 @@ jobs:
           keys: [backend-build]
       - test:
           directory: ./backend
+          layer: Back-end
       - notify_failure
   
   scan-frontend:
@@ -172,6 +193,7 @@ jobs:
           keys: [frontend-build]
       - audit:
           directory: ./frontend
+          layer: Front-end
       - notify_failure
 
   scan-backend:
@@ -182,6 +204,7 @@ jobs:
           keys: [backend-build]
       - audit:
           directory: ./backend
+          layer: Back-end
       - notify_failure
   
   deploy-infrastructure:
@@ -219,15 +242,12 @@ jobs:
       - add_ssh_keys:
           fingerprints: ["e7:2e:e3:83:66:0d:62:d4:ad:d7:73:fb:f5:b3:19:a3"]
       - run:
-          name: Install dependencies
+          name: Install tar & gzip utilities
           command: |
-            apk add --no-cache \
-                python3 \
-                py3-pip \
-            && pip3 install --upgrade pip \
-            && pip3 install --no-cache-dir \
-                awscli \
-            && rm -rf /var/cache/apk/*
+            apk add tar gzip
+      - run:
+          name: Install ansible
+          command: |
             apk add --update ansible
       - run:
           name: Run Playbook and Configure Servers
@@ -238,6 +258,7 @@ jobs:
           root: ~/
           paths:
             - project/*
+      - install_awscli_python
       - destory_environment_on_failure
   
   run-migrations:
@@ -274,26 +295,25 @@ jobs:
 workflows:
   default:
     jobs:
-      # - build-frontend:
-      #     context: ${SLACK_CONTEXT}
-      # - build-backend:
-      #     context: ${SLACK_CONTEXT}
-      # - test-frontend:
-      #     requires: [build-frontend]
-      #     context: ${SLACK_CONTEXT}
-      # - test-backend:
-      #     requires: [build-backend]
-      #     context: ${SLACK_CONTEXT}
-      # - scan-frontend:
-      #     requires: [build-frontend]
-      #     context: ${SLACK_CONTEXT}
-      # - scan-backend:
-      #     requires: [build-backend]
-      #     context: ${SLACK_CONTEXT}
-      # - deploy-infrastructure:
-      #     requires: [scan-frontend, test-frontend, scan-backend, test-backend]
-      # - configure-infrastructure:
-      #     requires: [deploy-infrastructure]
-      # - run-migrations:
-          # requires: [scan-frontend, test-frontend, scan-backend, test-backend]
-      - run-migrations
+      - build-frontend:
+          context: ${SLACK_CONTEXT}
+      - build-backend:
+          context: ${SLACK_CONTEXT}
+      - test-frontend:
+          requires: [build-frontend]
+          context: ${SLACK_CONTEXT}
+      - test-backend:
+          requires: [build-backend]
+          context: ${SLACK_CONTEXT}
+      - scan-frontend:
+          requires: [build-frontend]
+          context: ${SLACK_CONTEXT}
+      - scan-backend:
+          requires: [build-backend]
+          context: ${SLACK_CONTEXT}
+      - deploy-infrastructure:
+          requires: [scan-frontend, test-frontend, scan-backend, test-backend]
+      - configure-infrastructure:
+          requires: [deploy-infrastructure]
+      - run-migrations:
+          requires: [configure-infrastructure]
