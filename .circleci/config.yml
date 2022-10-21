@@ -117,12 +117,6 @@ commands:
             npm audit fix --force
             npm audit fix
             npm audit --audit-level=critical
-  notify_failure:
-    steps:
-      - slack/notify:
-          event: fail
-          mentions: "@Ahmed_Ibrahim"
-          template: basic_fail_1
   empty_s3_bucket_on_failure:
     steps:
       - run:
@@ -169,7 +163,10 @@ jobs:
       - save_cache:
           paths: [frontend/node_modules]
           key: frontend-build
-      - notify_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
 
   build-backend:
     executor: node
@@ -183,7 +180,11 @@ jobs:
       - save_cache:
           paths: [backend/node_modules]
           key: backend-build
-      - notify_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
+
   
   test-frontend:
     executor: node
@@ -194,7 +195,10 @@ jobs:
       - test:
           directory: ./frontend
           layer: Front-end
-      - notify_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
 
   test-backend:
     executor: node
@@ -205,7 +209,10 @@ jobs:
       - test:
           directory: ./backend
           layer: Back-end
-      - notify_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
   
   scan-frontend:
     executor: node
@@ -216,7 +223,10 @@ jobs:
       - audit:
           directory: ./frontend
           layer: Front-end
-      - notify_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
 
   scan-backend:
     executor: node
@@ -227,7 +237,10 @@ jobs:
       - audit:
           directory: ./backend
           layer: Back-end
-      - notify_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
   
   deploy-infrastructure:
     executor: aws
@@ -255,6 +268,10 @@ jobs:
           paths:
             - project/*
       - destory_environment_on_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
 
   configure-infrastructure:
     executor: python
@@ -279,6 +296,10 @@ jobs:
             - project/*
       - install_awscli_python
       - destory_environment_on_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
   
   run-migrations:
     executor: node
@@ -308,6 +329,10 @@ jobs:
       - install_awscli
       - destory_environment_on_failure
       - revert_migrations_on_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
   
   deploy-frontend:
     executor: node
@@ -335,6 +360,10 @@ jobs:
             aws s3 cp ./dist "s3://udapeople-${CIRCLE_WORKFLOW_ID:0:7}" --recursive
       - destory_environment_on_failure
       - revert_migrations_on_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
   
   deploy-backend:
     executor: python
@@ -370,6 +399,10 @@ jobs:
       - empty_s3_bucket_on_failure
       - destory_environment_on_failure
       - revert_migrations_on_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
 
   smoke-test:
     executor: node
@@ -407,6 +440,10 @@ jobs:
       - empty_s3_bucket_on_failure
       - destory_environment_on_failure
       - revert_migrations_on_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
   
   cloudfront-update:
     executor: aws
@@ -439,6 +476,10 @@ jobs:
       - empty_s3_bucket_on_failure
       - destory_environment_on_failure
       - revert_migrations_on_failure
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
 
   cleanup:
     executor: aws
@@ -478,6 +519,10 @@ jobs:
               aws cloudformation delete-stack --stack-name udapeople-backend-${BLUE_WORKFLOW_ID}
               aws cloudformation delete-stack --stack-name udapeople-frontend-${BLUE_WORKFLOW_ID}
             fi
+      - slack/notify:
+          event: fail
+          mentions: "@Ahmed_Ibrahim"
+          template: basic_fail_1
 
 
 # =====================================================================
@@ -485,24 +530,21 @@ jobs:
 workflows:
   default:
     jobs:
-      # - build-frontend:
-      #     context: ${SLACK_CONTEXT}
-      # - build-backend:
-      #     context: ${SLACK_CONTEXT}
-      # - test-frontend:
-      #     requires: [build-frontend]
-      #     context: ${SLACK_CONTEXT}
-      # - test-backend:
-      #     requires: [build-backend]
-      #     context: ${SLACK_CONTEXT}
-      # - scan-frontend:
-      #     requires: [build-frontend]
-      #     context: ${SLACK_CONTEXT}
-      # - scan-backend:
-      #     requires: [build-backend]
-      #     context: ${SLACK_CONTEXT}
-      - deploy-infrastructure #:
-          # requires: [scan-frontend, test-frontend, scan-backend, test-backend]
+      - build-frontend
+      - build-backend
+      - test-frontend:
+          requires: [build-frontend]
+      - test-backend:
+          requires: [build-backend]
+      - scan-frontend:
+          requires: [build-frontend]
+      - scan-backend:
+          requires: [build-backend]
+      - deploy-infrastructure:
+          requires: [scan-frontend, test-frontend, scan-backend, test-backend]
+          filters:
+            branches:
+              only: [master]
       - configure-infrastructure:
           requires: [deploy-infrastructure]
       - run-migrations:
