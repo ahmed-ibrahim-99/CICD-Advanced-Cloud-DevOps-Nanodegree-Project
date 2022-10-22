@@ -1,6 +1,0 @@
-[URL01] 
-https://github.com/ahmed-ibrahim-99/CircleCi-Ansible-Prometheus-Udacity-egFwd-DevOps
-
-[URL02]
-http://udapeople-4eedc8a.s3-website-us-east-1.amazonaws.com
-
